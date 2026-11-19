@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Face Local">
+<meta name="theme-color" content="#14202b">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Face Local</title>
+<style>
+:root{--ink:#14202b;--paper:#f4f6f8;--card:#fff;--line:#d9dfe5;--accent:#0b7a6b;--warn:#a4452c;--muted:#5b6875}
+@media(prefers-color-scheme:dark){:root{--ink:#e8edf2;--paper:#0f161d;--card:#18222c;--line:#2a3743;--accent:#3cc4b0;--warn:#f0907a;--muted:#93a1ae}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 -apple-system,system-ui,"Segoe UI",sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+header{padding:20px 16px 8px}
+h1{margin:0;font-size:26px;letter-spacing:-.02em}
+header p{margin:4px 0 0;color:var(--muted);font-size:14px}
+nav{display:flex;gap:6px;padding:12px 16px;position:sticky;top:0;background:var(--paper);z-index:2;border-bottom:1px solid var(--line)}
+nav button{flex:1;padding:10px 4px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;font:inherit;font-size:14px}
+nav button[aria-selected=true]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+main{padding:16px;max-width:640px;margin:0 auto}
+section[hidden]{display:none}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+label.btn,button.btn{display:inline-block;padding:12px 16px;background:var(--accent);color:#fff;border:0;border-radius:10px;font:inherit;font-weight:600;cursor:pointer}
+button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+input[type=text],input[type=number]{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font:inherit}
+input[type=file]{display:none}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.row img{width:64px;height:64px;border-radius:10px;object-fit:cover;flex:none;background:var(--line)}
+.grow{flex:1;min-width:0}
+.muted{color:var(--muted);font-size:14px}
+.warn{color:var(--warn)}
+.score{font-variant-numeric:tabular-nums;font-weight:700}
+.match{color:var(--accent)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
+.grid figure{margin:0;cursor:pointer}
+.grid img{width:100%;aspect-ratio:1;border-radius:10px;object-fit:cover}
+.grid figcaption{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#status{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));background:var(--ink);color:var(--paper);padding:10px 14px;border-radius:10px;font-size:14px;display:none;z-index:5}
+code{background:var(--paper);padding:1px 5px;border-radius:4px;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Face Local</h1>
+  <p>Photos and face data stay on this device. Nothing is uploaded.</p>
+</header>
+<nav role="tablist">
+  <button role="tab" aria-selected="true" data-tab="add">Add</button>
+  <button role="tab" aria-selected="false" data-tab="search">Search</button>
+  <button role="tab" aria-selected="false" data-tab="web">Web</button>
+  <button role="tab" aria-selected="false" data-tab="library">Library</button>
+  <button role="tab" aria-selected="false" data-tab="data">Data</button>
+</nav>
+<main>
+  <section id="add">
+    <div class="card">
+      <p class="muted">Add photos of people who agreed to be in your library. Each detected face is saved with the name you enter.</p>
+      <label class="btn">Choose photos<input id="addFiles" type="file" accept="image/*" multiple></label>
+      <label class="btn" style="background:transparent;color:var(--ink);border:1px solid var(--line);margin-left:8px">
+        Upload ZIP<input id="zipFile" type="file" accept=".zip,application/zip">
+      </label>
+    </div>
+    <div id="addResults"></div>
+  </section>
+
+  <section id="search" hidden>
+    <div class="card">
+      <p class="muted">Pick a photo to compare its faces against your library.</p>
+      <label class="btn">Choose a photo<input id="searchFile" type="file" accept="image/*"></label>
+    </div>
+    <div id="searchResults"></div>
+  </section>
+
+  <section id="web" hidden>
+    <div class="card">
+      <p class="muted">Fetch image URLs from a page via the serverless scraper. Images are streamed back through a same‑origin proxy, so saving them to your library works regardless of the source site's CORS policy.</p>
+      <label>Page URL <input type="text" id="webUrl" placeholder="https://example.com/gallery"></label>
+      <div class="row" style="margin-top:8px">
+        <label class="grow" style="min-width:120px">Max images <input type="number" id="webMax" value="50" min="1" max="200"></label>
+        <label class="grow" style="min-width:120px">Min side (px) <input type="number" id="webMinSize" value="100" min="10"></label>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label><input type="checkbox" class="webFmt" value="jpg" checked> JPG</label>
+        <label><input type="checkbox" class="webFmt" value="png" checked> PNG</label>
+        <label><input type="checkbox" class="webFmt" value="webp" checked> WEBP</label>
+      </div>
+      <button class="btn" id="webFetchBtn" style="margin-top:10px">Fetch images</button>
+    </div>
+    <div id="webResults"></div>
+  </section>
+
+  <section id="library" hidden>
+    <p id="libCount" class="muted"></p>
+    <div id="libGrid" class="grid"></div>
+  </section>
+
+  <section id="data" hidden>
+    <div class="card">
+      <strong>Export</strong>
+      <p class="muted">Download your library as JSON for backup.</p>
+      <button class="btn" id="exportBtn">Export library</button>
+    </div>
+    <div class="card">
+      <strong>Import ChromaDB export</strong>
+      <p class="muted">JSON with <code>ids</code>, <code>embeddings</code>, <code>metadatas</code>. Imported vectors are searchable only against faces from the same model and preprocessing. This app computes 128‑number vectors with face-api.js, so ArcFace, FaceNet512 and VGG-Face imports are stored but will not match.</p>
+      <label class="btn ghost" style="border:1px solid var(--line);background:transparent;color:var(--ink)">Choose JSON<input id="importFile" type="file" accept="application/json,.json"></label>
+    </div>
+    <div class="card">
+      <strong>Batch download with Python</strong>
+      <p class="muted">For JS‑heavy or login‑gated sites, run <code>image-download.py</code> from the <a href="https://github.com/SchBenedikt/face/blob/main/image-download.py" target="_blank" rel="noopener">SchBenedikt/face</a> repo locally, then zip the output and use <strong>Upload ZIP</strong> on the Add tab.</p>
+    </div>
+    <div class="card">
+      <strong>Delete everything</strong>
+      <p class="muted">Removes all faces and thumbnails from this browser.</p>
+      <button class="btn" style="background:var(--warn)" id="wipeBtn">Delete library</button>
+    </div>
+  </section>
+</main>
+<div id="status" role="status"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.js"></script>
+<script>
+const MODEL_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model/";
+const MODEL_KEY = "faceapi-128";
+const MATCH_DIST = 0.6;
+const $ = s => document.querySelector(s);
+
+// ---------- storage (IndexedDB) ----------
+const dbp = new Promise((res, rej) => {
+  const r = indexedDB.open("facelocal", 1);
+  r.onupgradeneeded = () => r.result.createObjectStore("faces", { keyPath: "id" });
+  r.onsuccess = () => res(r.result);
+  r.onerror = () => rej(r.error);
+});
+async function tx(mode, fn) {
+  const db = await dbp;
+  return new Promise((res, rej) => {
+    const t = db.transaction("faces", mode);
+    const out = fn(t.objectStore("faces"));
+    t.oncomplete = () => res(out && out.result !== undefined ? out.result : undefined);
+    t.onerror = () => rej(t.error);
+  });
+}
+const putFace    = f  => tx("readwrite", s => s.put(f));
+const allFaces   = () => tx("readonly",  s => s.getAll());
+const delFace    = id => tx("readwrite", s => s.delete(id));
+const clearFaces = () => tx("readwrite", s => s.clear());
+
+// ---------- ui helpers ----------
+let toastTimer;
+function toast(msg, sticky) {
+  const el = $("#status");
+  el.textContent = msg; el.style.display = "block";
+  clearTimeout(toastTimer);
+  if (!sticky) toastTimer = setTimeout(() => el.style.display = "none", 3500);
+}
+const uid = () => crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random();
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.setAttribute("aria-selected", x === b));
+  document.querySelectorAll("main section").forEach(s => s.hidden = s.id !== b.dataset.tab);
+  if (b.dataset.tab === "library") renderLibrary();
+});
+
+// ---------- models ----------
+let modelsReady;
+function loadModels() {
+  if (!modelsReady) {
+    toast("Loading face models (first time only)…", true);
+    modelsReady = Promise.all([
+      faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+      faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+      faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+    ]).then(() => { $("#status").style.display = "none"; })
+      .catch(e => { modelsReady = null; toast("Could not load models: " + e.message); throw e; });
+  }
+  return modelsReady;
+}
+
+// ---------- detection ----------
+async function fileToCanvas(file, maxSide = 1280) {
+  const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+  const k = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+  const c = document.createElement("canvas");
+  c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+  return c;
+}
+function thumb(canvas, box) {
+  const pad = box.width * 0.25;
+  const x = Math.max(0, box.x - pad), y = Math.max(0, box.y - pad);
+  const w = Math.min(canvas.width - x, box.width + pad * 2);
+  const h = Math.min(canvas.height - y, box.height + pad * 2);
+  const t = document.createElement("canvas"); t.width = t.height = 128;
+  t.getContext("2d").drawImage(canvas, x, y, w, h, 0, 0, 128, 128);
+  return t.toDataURL("image/jpeg", 0.8);
+}
+async function detect(file) {
+  await loadModels();
+  const canvas = await fileToCanvas(file);
+  const found = await faceapi.detectAllFaces(canvas, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.6 }))
+    .withFaceLandmarks().withFaceDescriptors();
+  return found.map(f => ({ thumb: thumb(canvas, f.detection.box), vector: Array.from(f.descriptor) }));
+}
+const dist = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; s += d * d; } return Math.sqrt(s); };
+
+// ---------- reusable "add one file" pipeline ----------
+async function processAddFile(file, out) {
+  const faces = await detect(file);
+  if (!faces.length) {
+    out.insertAdjacentHTML("beforeend", `<div class="card muted">No face found in ${esc(file.name)}.</div>`);
+    return;
+  }
+  faces.forEach(f => {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <div class="row">
+        <img src="${f.thumb}" alt="">
+        <div class="grow">
+          <input type="text" placeholder="Name" aria-label="Name">
+          <div class="muted" style="margin-top:6px">${esc(file.name)}</div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn save">Save face</button>
+        <button class="btn ghost skip">Skip</button>
+      </div>`;
+    card.querySelector(".save").onclick = async () => {
+      const name = card.querySelector("input").value.trim();
+      if (!name) { toast("Enter a name first."); return; }
+      await putFace({
+        id: uid(), label: name, thumb: f.thumb, modelKey: MODEL_KEY,
+        vector: f.vector, source: file.name, created: Date.now()
+      });
+      card.remove(); toast("Saved " + name);
+    };
+    card.querySelector(".skip").onclick = () => card.remove();
+    out.appendChild(card);
+  });
+}
+
+// ---------- add (files) ----------
+$("#addFiles").onchange = async e => {
+  const out = $("#addResults"); out.innerHTML = "";
+  for (const file of e.target.files) {
+    try {
+      toast("Scanning " + file.name + "…", true);
+      await processAddFile(file, out);
+    } catch (err) { toast("Failed on " + file.name + ": " + err.message); }
+  }
+  $("#status").style.display = "none"; e.target.value = "";
+};
+
+// ---------- add (ZIP) ----------
+$("#zipFile").onchange = async e => {
+  const file = e.target.files[0]; if (!file) return;
+  try {
+    toast("Reading ZIP…", true);
+    const zip = await JSZip.loadAsync(file);
+    const names = Object.keys(zip.files).filter(n => /\.(jpe?g|png|webp|gif|bmp|tiff)$/i.test(n));
+    if (!names.length) { toast("No images found in ZIP."); return; }
+    const out = $("#addResults"); out.innerHTML = "";
+    for (const name of names) {
+      toast(`Processing ${name}…`, true);
+      const blob = await zip.files[name].async("blob");
+      const fake = new File([blob], name, { type: blob.type || "image/jpeg" });
+      try { await processAddFile(fake, out); }
+      catch (err) { out.insertAdjacentHTML("beforeend", `<div class="card warn">Failed on ${esc(name)}: ${esc(err.message)}</div>`); }
+    }
+  } catch (err) {
+    toast("ZIP error: " + err.message);
+  }
+  $("#status").style.display = "none"; e.target.value = "";
+};
+
+// ---------- search ----------
+$("#searchFile").onchange = async e => {
+  const out = $("#searchResults"); out.innerHTML = "";
+  const file = e.target.files[0]; if (!file) return;
+  try {
+    toast("Searching…", true);
+    const lib = await allFaces();
+    const faces = await detect(file);
+    const pool = lib.filter(r => r.modelKey === MODEL_KEY && r.vector.length === 128);
+    if (!faces.length) out.innerHTML = `<div class="card muted">No face found in that photo.</div>`;
+    if (!pool.length) out.insertAdjacentHTML("beforeend", `<div class="card muted">Your library has no compatible faces yet. Add some first.</div>`);
+    else faces.forEach((f, i) => {
+      const ranked = pool.map(r => ({ r, d: dist(f.vector, r.vector) })).sort((a, b) => a.d - b.d).slice(0, 5);
+      const card = document.createElement("div"); card.className = "card";
+      card.innerHTML =
+        `<div class="row"><img src="${f.thumb}" alt=""><div class="grow"><strong>Face ${i + 1}</strong><div class="muted">Lower distance = more similar. Under ${MATCH_DIST} is usually the same person, but it can be wrong.</div></div></div>` +
+        ranked.map(({ r, d }) =>
+          `<div class="row" style="margin-top:10px"><img src="${r.thumb || ""}" alt=""><div class="grow">${esc(r.label)}</div><div class="score ${d < MATCH_DIST ? "match" : ""}">${d.toFixed(2)}</div></div>`
+        ).join("");
+      out.appendChild(card);
+    });
+  } catch (err) { toast("Search failed: " + err.message); }
+  $("#status").style.display = "none"; e.target.value = "";
+};
+
+// ---------- library ----------
+async function renderLibrary() {
+  const faces = (await allFaces()).sort((a, b) => b.created - a.created);
+  $("#libCount").textContent = faces.length
+    ? faces.length + " faces saved. Tap one to delete."
+    : "Nothing saved yet. Add photos on the Add tab.";
+  $("#libGrid").innerHTML = "";
+  faces.forEach(f => {
+    const fig = document.createElement("figure");
+    fig.innerHTML = `<img src="${f.thumb || ""}" alt=""><figcaption>${esc(f.label)}${f.modelKey !== MODEL_KEY ? " (imported)" : ""}</figcaption>`;
+    fig.onclick = async () => {
+      if (confirm("Delete " + f.label + "?")) { await delFace(f.id); renderLibrary(); }
+    };
+    $("#libGrid").appendChild(fig);
+  });
+}
+
+// ---------- web scraper ----------
+$("#webFetchBtn").onclick = async () => {
+  const url = $("#webUrl").value.trim();
+  if (!url) { toast("Enter a URL."); return; }
+  const maxImages = parseInt($("#webMax").value) || 50;
+  const minSize   = parseInt($("#webMinSize").value) || 100;
+  const formats   = [...document.querySelectorAll(".webFmt:checked")].map(cb => cb.value);
+  if (!formats.length) { toast("Pick at least one format."); return; }
+
+  const out = $("#webResults"); out.innerHTML = "";
+  toast("Fetching page…", true);
+
+  let urls;
+  try {
+    const res = await fetch("/api/scrape", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, maxImages, formats })
+    });
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+    urls = j.images || [];
+  } catch (err) {
+    out.innerHTML = `<div class="card warn">Scraper failed: ${esc(err.message)}</div>`;
+    $("#status").style.display = "none";
+    return;
+  }
+
+  if (!urls.length) {
+    out.innerHTML = `<div class="card muted">No image URLs found. Try a different page, or use the local image-download.py workflow for JS-heavy sites.</div>`;
+    $("#status").style.display = "none";
+    return;
+  }
+
+  toast(`Found ${urls.length} URLs, checking sizes…`, true);
+  const proxy = u => "/api/proxy?url=" + encodeURIComponent(u);
+  let added = 0;
+
+  for (const src of urls) {
+    if (added >= maxImages) break;
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <div class="row">
+        <img alt="">
+        <div class="grow">
+          <div class="muted" style="font-size:12px;word-break:break-all">${esc(src)}</div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn add">Add to library</button>
+        <button class="btn ghost skip">Skip</button>
+      </div>`;
+
+    const img = card.querySelector("img");
+    // Try direct first (fast path); fall back to proxy for CORS-blocked images
+    const loaded = await new Promise(resolve => {
+      let done = false;
+      const finish = ok => { if (!done) { done = true; resolve(ok); } };
+      img.onload  = () => finish(img.naturalWidth >= minSize && img.naturalHeight >= minSize);
+      img.onerror = () => {
+        // fallback via proxy
+        img.onerror = () => finish(false);
+        img.onload  = () => finish(img.naturalWidth >= minSize && img.naturalHeight >= minSize);
+        img.src = proxy(src);
+      };
+      img.src = src;
+      setTimeout(() => finish(false), 8000);
+    });
+    if (!loaded) continue;
+
+    card.querySelector(".add").onclick = async () => {
+      try {
+        toast("Downloading…", true);
+        const blob = await fetch(proxy(src)).then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.blob(); });
+        const ext = (blob.type.split("/")[1] || "jpg").replace("jpeg", "jpg");
+        const file = new File([blob], "web-" + Date.now() + "." + ext, { type: blob.type || "image/jpeg" });
+        await processAddFile(file, out);
+        card.remove();
+      } catch (err) {
+        toast("Could not add: " + err.message);
+      } finally {
+        $("#status").style.display = "none";
+      }
+    };
+    card.querySelector(".skip").onclick = () => card.remove();
+
+    out.appendChild(card);
+    added++;
+  }
+
+  if (!added) {
+    out.insertAdjacentHTML("beforeend", `<div class="card muted">None of the images passed the size filter (min side ${minSize}px).</div>`);
+  }
+  $("#status").style.display = "none";
+};
+
+// ---------- data ----------
+$("#exportBtn").onclick = async () => {
+  const faces = await allFaces();
+  const blob = new Blob([JSON.stringify({ modelKey: MODEL_KEY, faces })], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "face-local-export.json";
+  a.click();
+};
+
+$("#importFile").onchange = async e => {
+  const file = e.target.files[0]; if (!file) return;
+  try {
+    const j = JSON.parse(await file.text());
+    if (!j.ids || !j.embeddings || j.ids.length !== j.embeddings.length) {
+      throw new Error("Needs matching ids and embeddings.");
+    }
+    let n = 0;
+    for (let i = 0; i < j.ids.length; i++) {
+      const m = (j.metadatas && j.metadatas[i]) || {};
+      await putFace({
+        id: String(j.ids[i]),
+        label: m.person_name || m.name || "Imported",
+        thumb: "",
+        modelKey: "imported-" + j.embeddings[i].length,
+        vector: j.embeddings[i],
+        source: m.image_path || m.source || "",
+        created: Date.now()
+      });
+      n++;
+    }
+    toast("Imported " + n + " records.");
+  } catch (err) { toast("Import failed: " + err.message); }
+  e.target.value = "";
+};
+
+$("#wipeBtn").onclick = async () => {
+  if (confirm("Delete every saved face?")) { await clearFaces(); toast("Library deleted."); }
+};
+</script>
+</body>
+</html>
