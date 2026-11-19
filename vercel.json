@@ -1,6 +1,8 @@
 {
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
   "functions": {
-    "api/scrape.py": { "maxDuration": 30, "memory": 1024 },
-    "api/proxy.py":  { "maxDuration": 30, "memory": 1024 }
+    "api/index.py": { "maxDuration": 30, "memory": 1024 }
   }
 }
