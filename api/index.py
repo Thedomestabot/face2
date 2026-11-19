@@ -1,6 +1,6 @@
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, urljoin, parse_qs
-import json, requests
+import json, os, requests
 from bs4 import BeautifulSoup
 
 USER_AGENT = "Mozilla/5.0 (compatible; FaceLocal/1.0)"
@@ -68,19 +68,36 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(payload).encode())
 
+    def do_GET(self):
+        # Serve the frontend for the root path
+        if self.path in ("/", ""):
+            try:
+                here = os.path.dirname(__file__)
+                html_path = os.path.join(here, "..", "index.html")
+                with open(html_path, "rb") as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            except Exception as e:
+                self._json(500, {"error": f"Could not read index.html: {e}"})
+                return
+
+        # Route /api/proxy
+        if self.path.startswith("/api/proxy"):
+            self._handle_proxy()
+            return
+
+        self._json(404, {"error": "Unknown GET route"})
+
     def do_POST(self):
         # Route /api/scrape
         if self.path.startswith("/api/scrape"):
             self._handle_scrape()
         else:
             self._json(404, {"error": "Unknown POST route"})
-
-    def do_GET(self):
-        # Route /api/proxy
-        if self.path.startswith("/api/proxy"):
-            self._handle_proxy()
-        else:
-            self._json(404, {"error": "Unknown GET route"})
 
     # ---------- scraper logic ----------
     def _handle_scrape(self):
